@@ -20,7 +20,7 @@ tasks:
         msg: Either `package.yml` or `pspec.xml` must exists in the current directory
 
   # Build packages
-  build: 
+  build:
     desc: Build the current package against the unstable repo
     aliases: [default]
     dir: '{{ .USER_WORKING_DIR }}'
@@ -36,7 +36,7 @@ tasks:
     aliases: [stable]
     cmds:
       - task: build
-        vars: 
+        vars:
           PROFILE: 'main-x86_64'
       - |
         echo "=========================================================================="
@@ -50,7 +50,7 @@ tasks:
     aliases: [local]
     cmds:
       - task: build
-        vars: 
+        vars:
           PROFILE: 'local-unstable-x86_64'
 
   # Modify packages
@@ -65,7 +65,7 @@ tasks:
       - package-file
     cmds:
       - python {{ .BUMP_SCRIPT }} {{ .SPECFILE }}
-  
+
   convert:
     desc: Convert pspec to package.yml
     dir: '{{ .USER_WORKING_DIR }}'
@@ -151,3 +151,40 @@ tasks:
     desc: Update local repositories to use correct hostname
     cmds:
       - go run "{{ .TASKFILE_DIR }}/common/Go/switch_repo_domains.go"
+
+  pkgconfig:
+    desc: Find which package provides a given pkgconfig. Example usage `go-task pkgconfig -- Qt5Core Qt6Core`
+    cmds:
+      - python {{ .TASKFILE_DIR }}/common/Scripts/epcsearch.py {{ .CLI_ARGS }}
+
+  clone:
+    desc: Clone a given packages source repo. Example usage `go-task clone -- reponame`
+    cmds:
+      - |
+        if [ -d "{{.CLI_ARGS}}" ]; then
+          echo "Clone already exists"
+        else
+            git clone https://github.com/solus-packages/{{ .CLI_ARGS }}.git
+            git -C "{{ .CLI_ARGS }}" remote set-url origin "https://github.com/solus-packages/{{ .CLI_ARGS }}.git"
+            git -C "{{ .CLI_ARGS }}" remote set-url --push origin "git@github.com:solus-packages/{{ .CLI_ARGS }}.git"
+        fi
+
+  clone-all:
+    desc: Clone all Solus package source repos (You probably do not want to do this)
+    cmds:
+        - python3 {{ .TASKFILE_DIR }}/common/Scripts/clone-all.py {{ .CLI_ARGS }}
+
+  update-tooling:
+    aliases: [up]
+    desc: Update common, infrastructure-tooling and all solbuild profiles present
+    cmds:
+      - git -C {{ .TASKFILE_DIR }}/common pull
+      - |
+        if [ -d "{{ .TASKFILE_DIR }}/infrastructure-tooling" ]; then
+          git -C {{ .TASKFILE_DIR}}/infrastructure-tooling pull
+        fi
+      - sudo solbuild update
+      - |
+        if [ -f /usr/share/solbuild/main-x86_64.profile ]; then
+          sudo solbuild update -p main-x86_64
+        fi
