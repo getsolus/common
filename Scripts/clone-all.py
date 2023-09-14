@@ -38,19 +38,23 @@ def main():
     except FileNotFoundError:
         print(f"File not found: {pkgs_fpath}")
 
+    failed_pkgs = []
+    initial_loop = True
+
     try:
         while True:
-            failed_pkgs = []
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=args.j) as executor:
-                futures = {executor.submit(clone_all, base_repo, pkg, failed_pkgs) for pkg in pkgs}
-
+            if initial_loop:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=args.j) as executor:
+                    futures = {executor.submit(clone_all, base_repo, pkg, failed_pkgs) for pkg in pkgs}
+                    initial_loop = False
+            else:
+                print(f"\n{failed_pkgs} packages failed")
+                retry = input("Would you like to retry (y/n?)\n").lower()
+                if retry not in ["yes", "y"]:
+                    break
+                with concurrent.futures.ThreadPoolExecutor(max_workers=args.j) as executor:
+                    futures = {executor.submit(clone_all, base_repo, pkg, failed_pkgs) for pkg in failed_pkgs}
             if not failed_pkgs:
-                break
-
-            print(f"\n{failed_pkgs} packages failed")
-            retry = input("Would you like to retry (y/n?)\n").lower()
-            if retry not in ["yes", "y"]:
                 break
     except KeyboardInterrupt:
         executor.shutdown(cancel_futures=True)
