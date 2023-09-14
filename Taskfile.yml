@@ -155,7 +155,7 @@ tasks:
   pkgconfig:
     desc: Find which package provides a given pkgconfig. Example usage `go-task pkgconfig -- Qt5Core Qt6Core`
     cmds:
-      - python {{ .TASKFILE_DIR }}/common/Scripts/epcsearch.py {{ .CLI_ARGS }}
+      - python {{ .ROOT_DIR }}/common/Scripts/epcsearch.py {{ .CLI_ARGS }}
 
   clone:
     desc: Clone a given packages source repo. Example usage `go-task clone -- reponame`
