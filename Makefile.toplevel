@@ -33,7 +33,7 @@ upcheck:
 		git_repo=$(subst .pull,,$@); \
 		git -C "$(subst .pull,,$@)" remote set-url origin "https://github.com/solus-packages/$${git_repo}.git" || exit 0; \
 		git -C "$(subst .pull,,$@)" remote set-url --push origin "git@github.com:solus-packages/$${git_repo}.git" || exit 0; \
-		git -C "$(subst .pull,,$@)" pull || exit 0; \
+		git -C "$(subst .pull,,$@)" pull || echo "$${git_repo} failed to pull" && exit 0; \
 	)
 
 %.clone:
