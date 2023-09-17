@@ -1,5 +1,5 @@
 /*
- * Copyright 2020 Solus Project <copyright@getsol.us>
+ * Copyright 2023 Solus Project <copyright@getsol.us>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,98 +14,83 @@
  * limitations under the License.
  */
 
+// USAGE: GITHUB_AUTH_TOKEN=`gh auth token` go run deprecate_packages.go
+
 package main
 
 import (
 	"bufio"
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
+	"log"
 	"os"
-	"os/user"
+
+	"github.com/google/go-github/v54/github"
 )
 
-const defaultHost = "https://dev.getsol.us/api/"
+func getAllRepos(ctx context.Context, client *github.Client, organizationName string) ([]*github.Repository, error) {
+	opt := &github.RepositoryListByOrgOptions{
+		Type: "public",
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
 
-type ARCRC struct {
-	Hosts map[string]map[string]string `json:"hosts"`
+	var rateErr *github.RateLimitError
+	var abuseErr *github.AbuseRateLimitError
+
+	// get all pages of results
+	var allRepos []*github.Repository
+	for {
+		repos, resp, err := client.Repositories.ListByOrg(ctx, organizationName, opt)
+
+		if errors.As(err, &rateErr) {
+			log.Fatalln("hit rate limit")
+		}
+		if errors.As(err, &abuseErr) {
+			log.Fatalln("hit secondary rate limit")
+		}
+		if err != nil {
+			return nil, err
+		}
+		allRepos = append(allRepos, repos...)
+		log.Printf("Getting repos, page %d\n", opt.Page)
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+
+	//fmt.Printf("total repos found: %d\n", len(allRepos))
+	return allRepos, nil
 }
 
-type Repo struct {
-	Fields struct {
-		ShortName string `json:"shortName"`
-	} `json:"fields"`
-}
-
-type RepoResult struct {
-	Data   []Repo `json:"data"`
-	Cursor struct {
-		After string `json:"after"`
-	} `json:"cursor"`
-}
-
-type RepoResults struct {
-	Result RepoResult `json:"result"`
+func contains[T comparable](s []T, e T) bool {
+    for _, v := range s {
+        if v == e {
+            return true
+        }
+    }
+    return false
 }
 
 func main() {
-	u, err := user.Current()
+	ctx := context.Background()
+
+	token := os.Getenv("GITHUB_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("Unauthorized: No token present in GITHUB_AUTH_TOKEN")
+	}
+	client := github.NewTokenClient(ctx, token)
+
+	repos, err := getAllRepos(ctx, client, "solus-packages")
 	if err != nil {
-		panic(err.Error())
+		log.Fatalf("Failed to get repos, reason: %s\n", err)
 	}
-	config, err := os.Open(u.HomeDir + "/.arcrc")
-	if os.IsNotExist(err) {
-		config, err = os.Open(u.HomeDir + "/.config" + "/arcrc")
-	}
-	if err != nil {
-		panic(err.Error())
-	}
-	defer config.Close()
-	dec := json.NewDecoder(config)
-	var arcrc ARCRC
-	err = dec.Decode(&arcrc)
-	if err != nil {
-		panic(err.Error())
-	}
-	hostConfig, ok := arcrc.Hosts[defaultHost]
-	if !ok || len(hostConfig) == 0 {
-		panic("No host config found.")
-	}
-	token, ok := hostConfig["token"]
-	if !ok || len(token) == 0 {
-		panic("No host token found.")
-	}
-	repos := make(map[string]bool)
-	var next string
-	var resp *http.Response
-	for {
-		if len(next) > 0 {
-			resp, err = http.PostForm(defaultHost+"diffusion.repository.search",
-				url.Values{"api.token": {token}, "after": {next}, "queryKey": {"active"}})
-		} else {
-			resp, err = http.PostForm(defaultHost+"diffusion.repository.search",
-				url.Values{"api.token": {token}, "queryKey": {"active"}})
-		}
-		if err != nil {
-			panic(err.Error())
-		}
-		dec2 := json.NewDecoder(resp.Body)
-		var results RepoResults
-		err = dec2.Decode(&results)
-		resp.Body.Close()
-		if err != nil {
-			panic(err.Error())
-		}
-		for _, repo := range results.Result.Data {
-			repos[repo.Fields.ShortName] = true
-		}
-		next = results.Result.Cursor.After
-		if len(next) == 0 {
-			break
-		}
-	}
-	entries, err := os.ReadDir(".")
+
+	// FIXME: This is ugly but we need to run from the folder with the go.mod file
+	rootDir := "../../"
+
+	entries, err := os.ReadDir(rootDir)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -118,14 +103,19 @@ func main() {
 		if !entry.IsDir() {
 			continue
 		}
-		if !repos[entry.Name()] {
-			fmt.Println(entry.Name())
-			removals = append(removals, entry.Name())
+		for _, repo := range repos {
+			if *repo.Archived == true {
+				if string(entry.Name()) == string(*repo.Name) {
+					fmt.Println(entry.Name())
+					removals = append(removals, entry.Name())
+				}
+			}
 		}
 	}
+
 	fmt.Println()
 	for !done {
-		fmt.Println("Would you like to remove of all non-active repos? (yes/no)")
+		fmt.Println("Would you like to remove of all archived repos? (yes/no)")
 		ans, err := stdin.ReadString('\n')
 		if err != nil {
 			panic(err.Error())
@@ -146,7 +136,7 @@ func main() {
 	}
 	for _, dir := range removals {
 		fmt.Printf("Removing repository '%s'...", dir)
-		if err := os.RemoveAll("./" + dir); err != nil {
+		if err := os.RemoveAll(rootDir + dir); err != nil {
 			fmt.Printf("FAILED: %s\n", err.Error())
 		} else {
 			fmt.Println("DONE")
